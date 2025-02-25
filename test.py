@@ -18,7 +18,9 @@ device = torch.device('cuda:0')
 
 def load_network_weight(net, checkpoint_dir, name):
     weight_path = '{}/{}.pth'.format(checkpoint_dir, name)
-    net_state_dict = torch.load(weight_path, map_location='cuda:0')
+
+    # Use weights_only=True for safer model loading
+    net_state_dict = torch.load(weight_path, map_location='cuda:0', weights_only=True)
     net.load_state_dict(net_state_dict)
     print('{} weight-loading succeeds'.format(name))
 
