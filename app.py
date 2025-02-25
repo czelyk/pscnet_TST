@@ -41,10 +41,13 @@ async def predict(file: UploadFile = File(...)):
         image = np.array(image)
         image = torch.tensor(image).float().unsqueeze(0).permute(0, 3, 1, 2)  # Convert to CxHxW format
 
-        # Get the prediction asynchronously
-        pred_tag = await run_in_executor(image)
+        # Normalize image values to [0, 1]
+        image = image / 255.0
 
-        return {"prediction": pred_tag}
+        # Get the prediction asynchronously (base64 image result)
+        pred_base64 = await run_in_executor(image)
+
+        return {"prediction": pred_base64}
 
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}")

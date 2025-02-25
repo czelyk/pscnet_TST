@@ -1,35 +1,27 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.data import DataLoader
+
 from utils.utils import save_image
+
 from models.seg_hrnet import get_seg_model
 from models.seg_hrnet_config import get_hrnet_cfg
 from utils.config import get_pscc_args
 from models.NLCDetection import NLCDetection
 from models.detection_head import DetectionHead
 from utils.load_vdata import TestData
-from PIL import Image
-import io
-import base64
 
 device_ids = [Id for Id in range(torch.cuda.device_count())]
 device = torch.device('cuda:0')
 
+
 def load_network_weight(net, checkpoint_dir, name):
     weight_path = '{}/{}.pth'.format(checkpoint_dir, name)
-    net_state_dict = torch.load(weight_path, map_location='cuda:0', weights_only=True)
+    net_state_dict = torch.load(weight_path, map_location='cuda:0')
     net.load_state_dict(net_state_dict)
     print('{} weight-loading succeeds'.format(name))
 
-def image_to_base64(image_tensor):
-    """Converts a tensor to a base64 encoded string."""
-    image_tensor = image_tensor.squeeze().cpu().detach().numpy()
-    image_tensor = (image_tensor * 255).astype('uint8')  # Normalize values
-    image = Image.fromarray(image_tensor)
-    buffered = io.BytesIO()
-    image.save(buffered, format="PNG")
-    img_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
-    return img_str
 
 def test(args):
     # define backbone
@@ -64,41 +56,46 @@ def test(args):
     ClsNet = nn.DataParallel(ClsNet, device_ids=device_ids)
     load_network_weight(ClsNet, ClsNet_checkpoint_dir, ClsNet_name)
 
-    # Assume 'image_path' is the single image you want to test
-    image_path = args.image_path  # Update this in the args, or pass directly as an argument
-    image = Image.open(image_path).convert('RGB')
-    image = transforms.ToTensor()(image).unsqueeze(0).to(device)  # Convert image to tensor and add batch dimension
+    test_data_loader = DataLoader(TestData(args), batch_size=1, shuffle=False,
+                                  num_workers=8)
 
-    with torch.no_grad():
-        # backbone network
-        FENet.eval()
-        feat = FENet(image)
+    for batch_id, test_data in enumerate(test_data_loader):
 
-        # localization head
-        SegNet.eval()
-        pred_mask = SegNet(feat)[0]
+        image, cls, name = test_data
+        image = image.to(device)
 
-        pred_mask = F.interpolate(pred_mask, size=(image.size(2), image.size(3)), mode='bilinear', align_corners=True)
+        with torch.no_grad():
 
-        # classification head
-        ClsNet.eval()
-        pred_logit = ClsNet(feat)
+            # backbone network
+            FENet.eval()
+            feat = FENet(image)
 
-    # ce
-    sm = nn.Softmax(dim=1)
-    pred_logit = sm(pred_logit)
-    _, binary_cls = torch.max(pred_logit, 1)
+            # localization head
+            SegNet.eval()
+            pred_mask = SegNet(feat)[0]
 
-    pred_tag = 'forged' if binary_cls.item() == 1 else 'authentic'
+            pred_mask = F.interpolate(pred_mask, size=(image.size(2), image.size(3)), mode='bilinear',
+                                      align_corners=True)
 
-    # Convert pred_mask to base64
-    pred_mask_base64 = image_to_base64(pred_mask)
+            # classification head
+            ClsNet.eval()
+            pred_logit = ClsNet(feat)
 
-    print(f'The image {image_path} is {pred_tag}')
-    print(f'Predicted Mask (Base64): {pred_mask_base64[:100]}...')  # print the first 100 chars of the base64 for brevity
+        # ce
+        sm = nn.Softmax(dim=1)
+        pred_logit = sm(pred_logit)
+        _, binary_cls = torch.max(pred_logit, 1)
+
+        pred_tag = 'forged' if binary_cls.item() == 1 else 'authentic'
+
+        if args.save_tag:
+            save_image(pred_mask, name, 'mask')
+
+        print_name = name[0].split('/')[-1].split('.')[0]
+
+        print(f'The image {print_name} is {pred_tag}')
+
 
 if __name__ == '__main__':
     args = get_pscc_args()
-    # Add an argument to pass the image path (if not in args already)
-    args.image_path = 'path_to_your_image.jpg'  # You can also get this from command line args
     test(args)
