@@ -44,10 +44,23 @@ async def predict(file: UploadFile = File(...)):
         # Normalize image values to [0, 1]
         image = image / 255.0
 
-        # Get the prediction asynchronously (base64 image result)
-        pred_base64 = await run_in_executor(image)
+        # Get the prediction asynchronously (base64 result and confidence score)
+        pred_result = await run_in_executor(image)
 
-        return {"prediction": pred_base64}
+        # Ensure the model returns a tuple: (base64_string, confidence_score)
+        if isinstance(pred_result, tuple) and len(pred_result) == 2:
+            base64_image, confidence_score = pred_result
+        else:
+            raise ValueError("Model did not return a tuple (base64_image, confidence_score)")
+
+        # Normalize confidence score (adjust divisor if needed)
+        normalized_score = max(0.0, min(confidence_score / 100.0, 1.0))  # Adjust divisor based on your model
+
+        # Return formatted response
+        return {
+            "Confidence Score": round(confidence_score * 0.1 , 10),
+            "Base64 Image": base64_image
+        }
 
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}")
